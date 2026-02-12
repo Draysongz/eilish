@@ -1,0 +1,23 @@
+mt5:
+  path_env: MT5_PATH
+  login_env: MT5_LOGIN
+  password_env: MT5_PASSWORD
+  server_env: MT5_SERVER
+
+trade:
+  symbols: ["EURUSD"]
+  timeframe: M1
+  lot: 0.01
+  max_spread_pips: 1.5
+  sl_pips: 5
+  tp_pips: 8
+  max_positions: 1
+  magic: 20250212
+  dry_run: true
+  polling_seconds: 10
+
+strategy:
+  ema_fast: 9
+  ema_slow: 21
+  min_bars: 100
+  allow_short: true
