@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 
 from src.config import AppConfig, load_config
+from src.ai_filter import AITradeFilter, build_ai_config
 from src.mt5_client import MT5Client, credentials_from_env
 from src.strategy import generate_signal
 
@@ -67,6 +68,16 @@ def run_bot(config: AppConfig) -> None:
     client = MT5Client(creds)
     client.initialize()
 
+    ai_filter = None
+    if config.ai.enabled:
+        ai_config = build_ai_config(
+            enabled=config.ai.enabled,
+            model_path=config.ai.model_path,
+            train_data_path=config.ai.train_data_path,
+            probability_threshold=config.ai.probability_threshold,
+        )
+        ai_filter = AITradeFilter(ai_config)
+
     try:
         while True:
             for symbol in config.trade.symbols:
@@ -89,6 +100,14 @@ def run_bot(config: AppConfig) -> None:
                 if state.signal == "hold":
                     print(f"[{symbol}] No signal. EMA fast={state.ema_fast:.5f}, slow={state.ema_slow:.5f}")
                     continue
+
+                if ai_filter:
+                    allowed, probability = ai_filter.evaluate(rates)
+                    print(
+                        f"[{symbol}] AI filter: signal={state.signal} prob={probability:.2f} allowed={allowed}"
+                    )
+                    if not allowed:
+                        continue
 
                 decision = _build_decision(client, symbol, state.signal, config.trade.sl_pips, config.trade.tp_pips)
 

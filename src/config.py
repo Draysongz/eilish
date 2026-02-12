@@ -43,6 +43,15 @@ class AppConfig:
     mt5: MT5Config
     trade: TradeConfig
     strategy: StrategyConfig
+    ai: "AIConfig"
+
+
+@dataclass(frozen=True)
+class AIConfig:
+    enabled: bool
+    model_path: str
+    train_data_path: str
+    probability_threshold: float
 
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
@@ -62,6 +71,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
     mt5_raw = _required(raw, "mt5")
     trade_raw = _required(raw, "trade")
     strategy_raw = _required(raw, "strategy")
+    ai_raw = raw.get("ai", {})
 
     mt5 = MT5Config(
         path_env=_required(mt5_raw, "path_env"),
@@ -90,4 +100,11 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         allow_short=bool(_required(strategy_raw, "allow_short")),
     )
 
-    return AppConfig(mt5=mt5, trade=trade, strategy=strategy)
+    ai = AIConfig(
+        enabled=bool(ai_raw.get("enabled", False)),
+        model_path=str(ai_raw.get("model_path", "models/ai_filter.json")),
+        train_data_path=str(ai_raw.get("train_data_path", "data/trades.csv")),
+        probability_threshold=float(ai_raw.get("probability_threshold", 0.6)),
+    )
+
+    return AppConfig(mt5=mt5, trade=trade, strategy=strategy, ai=ai)

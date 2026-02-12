@@ -21,3 +21,9 @@ strategy:
   ema_slow: 21
   min_bars: 100
   allow_short: true
+
+ai:
+  enabled: false
+  model_path: models/ai_filter.json
+  train_data_path: data/trades.csv
+  probability_threshold: 0.6
