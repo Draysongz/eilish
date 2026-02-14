@@ -98,6 +98,27 @@ class MT5Client:
         if magic is None:
             return list(positions)
         return [pos for pos in positions if getattr(pos, "magic", None) == magic]
+    
+    def get_deals_history(self, from_date=None, to_date=None):
+        """Get deals history from MT5."""
+        self._require_mt5()
+        if from_date is None:
+            from datetime import datetime, timedelta
+            from_date = datetime.now() - timedelta(days=1)
+        if to_date is None:
+            from datetime import datetime
+            to_date = datetime.now()
+        
+        deals = mt5.history_deals_get(from_date, to_date)
+        return list(deals) if deals else []
+    
+    def get_position_by_ticket(self, ticket: int):
+        """Get position by ticket number."""
+        self._require_mt5()
+        positions = mt5.positions_get(ticket=ticket)
+        if positions and len(positions) > 0:
+            return positions[0]
+        return None
 
     def place_market_order(
         self,
@@ -107,7 +128,8 @@ class MT5Client:
         sl_price: float,
         tp_price: float,
         magic: int,
-    ) -> None:
+    ) -> Optional[int]:
+        """Place market order and return the position ticket."""
         self._require_mt5()
         order_type = mt5.ORDER_TYPE_BUY if action == "buy" else mt5.ORDER_TYPE_SELL
         price = mt5.symbol_info_tick(symbol).ask if action == "buy" else mt5.symbol_info_tick(symbol).bid
@@ -127,6 +149,8 @@ class MT5Client:
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             raise RuntimeError(f"Order failed: {result}")
+        # Return the order/position ticket for tracking
+        return result.order if hasattr(result, 'order') else None
 
 
 def credentials_from_env(login_env: str, password_env: str, server_env: str, path_env: str | None = None) -> MT5Credentials:

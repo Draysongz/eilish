@@ -36,6 +36,13 @@ class StrategyConfig:
     ema_slow: int
     min_bars: int
     allow_short: bool
+    use_rsi: bool
+    rsi_period: int
+    rsi_overbought: float
+    rsi_oversold: float
+    use_atr: bool
+    atr_period: int
+    atr_min_threshold: float
 
 
 @dataclass(frozen=True)
@@ -98,6 +105,13 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         ema_slow=int(_required(strategy_raw, "ema_slow")),
         min_bars=int(_required(strategy_raw, "min_bars")),
         allow_short=bool(_required(strategy_raw, "allow_short")),
+        use_rsi=bool(strategy_raw.get("use_rsi", True)),
+        rsi_period=int(strategy_raw.get("rsi_period", 14)),
+        rsi_overbought=float(strategy_raw.get("rsi_overbought", 70.0)),
+        rsi_oversold=float(strategy_raw.get("rsi_oversold", 30.0)),
+        use_atr=bool(strategy_raw.get("use_atr", True)),
+        atr_period=int(strategy_raw.get("atr_period", 14)),
+        atr_min_threshold=float(strategy_raw.get("atr_min_threshold", 0.00005)),
     )
 
     ai = AIConfig(

@@ -6,3 +6,5 @@ venv/
 .vscode/
 .pytest_cache/
 models/*.json
+logs/
+*.log

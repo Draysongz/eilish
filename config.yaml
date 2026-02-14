@@ -5,25 +5,49 @@ mt5:
   server_env: MT5_SERVER
 
 trade:
-  symbols: ["EURUSD"]
+  symbols: ["XAUUSD"]
   timeframe: M1
   lot: 0.01
-  max_spread_pips: 1.5
-  sl_pips: 5
-  tp_pips: 8
+  max_spread_pips: 50
+  sl_pips: 150
+  tp_pips: 250
   max_positions: 1
   magic: 20250212
-  dry_run: true
+  dry_run: false
   polling_seconds: 10
 
+# strategy:
+#   ema_fast: 12
+#   ema_slow: 36
+#   min_bars: 200
+#   allow_short: true
+#   # RSI filter settings
+#   use_rsi: true
+#   rsi_period: 14
+#   rsi_overbought: 68.0
+#   rsi_oversold: 32.0
+#   # ATR volatility filter settings
+#   use_atr: true
+#   atr_period: 14
+#   atr_min_threshold: 0.2  # Minimum ATR to consider trading
+
 strategy:
-  ema_fast: 9
-  ema_slow: 21
-  min_bars: 100
+  ema_fast: 6
+  ema_slow: 18
+  min_bars: 80
   allow_short: true
+  # RSI filter settings
+  use_rsi: true
+  rsi_period: 14
+  rsi_overbought: 68.0
+  rsi_oversold: 32.0
+  # ATR volatility filter settings
+  use_atr: true
+  atr_period: 14
+  atr_min_threshold: 0.2  # Minimum ATR to consider trading
 
 ai:
   enabled: false
   model_path: models/ai_filter.json
   train_data_path: data/trades.csv
-  probability_threshold: 0.6
+  probability_threshold: 0.45

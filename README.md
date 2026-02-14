@@ -43,7 +43,7 @@ cp .env.example .env
 	- If you don't have one yet, you can generate it from MT5 history (Windows required):
 
 ```bash
-python -m src.data_builder --symbol EURUSD --timeframe M1 --bars 5000 --horizon 15
+python -m src.data_builder --symbol XAUUSD --timeframe M1 --bars 8000 --horizon 15
 ```
 
 This will create `data/trades.csv` using your current strategy and label trades as profitable or not.
@@ -82,6 +82,16 @@ python -m src.price_importer --provider csv --input data/raw_prices.csv --output
 ### Dukascopy CSV export
 ```bash
 python -m src.price_importer --provider dukascopy --input data/dukascopy_export.csv --output data/price_history.csv
+```
+
+### Dukascopy API (dukascopy-python)
+```bash
+python -m src.price_importer --provider dukascopy_api --symbol XAUUSD --granularity M1 --start 2025-08-01 --end 2026-02-01 --output data/dukascopy_xauusd.csv
+```
+
+Then build training data from the CSV and filter for London + New York sessions (UTC):
+```bash
+python -m src.data_builder --input data/dukascopy_xauusd.csv --symbol XAUUSD --timeframe M1 --horizon 15 --session london+newyork --output data/trades.csv
 ```
 
 ### OANDA (requires API key)

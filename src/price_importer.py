@@ -64,6 +64,174 @@ def import_from_dukascopy_csv(path: Path) -> pd.DataFrame:
     return _standardize_columns(frame)
 
 
+def _dukascopy_interval(granularity: str):
+    try:
+        import dukascopy_python as dukascopy
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "dukascopy-python is not installed. Install it with 'pip install -r requirements.txt'."
+        ) from exc
+
+    interval_map = {
+        "S1": dukascopy.INTERVAL_SEC_1,
+        "S10": dukascopy.INTERVAL_SEC_10,
+        "S30": dukascopy.INTERVAL_SEC_30,
+        "M1": dukascopy.INTERVAL_MIN_1,
+        "M5": dukascopy.INTERVAL_MIN_5,
+        "M10": dukascopy.INTERVAL_MIN_10,
+        "M15": dukascopy.INTERVAL_MIN_15,
+        "M30": dukascopy.INTERVAL_MIN_30,
+        "H1": dukascopy.INTERVAL_HOUR_1,
+        "H4": dukascopy.INTERVAL_HOUR_4,
+        "D1": dukascopy.INTERVAL_DAY_1,
+        "W1": dukascopy.INTERVAL_WEEK_1,
+        "MN1": dukascopy.INTERVAL_MONTH_1,
+    }
+    if granularity not in interval_map:
+        raise ValueError(f"Unsupported Dukascopy granularity: {granularity}")
+    return interval_map[granularity]
+
+
+def _dukascopy_instrument(symbol: str):
+    try:
+        from dukascopy_python import instruments
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "dukascopy-python is not installed. Install it with 'pip install -r requirements.txt'."
+        ) from exc
+
+    normalized = symbol.upper().replace("/", "_")
+    if normalized == "XAUUSD":
+        return instruments.INSTRUMENT_FX_METALS_XAU_USD
+    if normalized == "XAGUSD":
+        return instruments.INSTRUMENT_FX_METALS_XAG_USD
+
+    attr_name = f"INSTRUMENT_FX_MAJORS_{normalized}"
+    if hasattr(instruments, attr_name):
+        return getattr(instruments, attr_name)
+    return symbol
+
+
+def _granularity_seconds(granularity: str) -> int:
+    seconds_map = {
+        "S1": 1,
+        "S10": 10,
+        "S30": 30,
+        "M1": 60,
+        "M5": 300,
+        "M10": 600,
+        "M15": 900,
+        "M30": 1800,
+        "H1": 3600,
+        "H4": 14400,
+        "D1": 86400,
+        "W1": 604800,
+        "MN1": 2592000,
+    }
+    return seconds_map.get(granularity, 60)
+
+
+def _safe_dukascopy_fetch(
+    symbol: str,
+    interval,
+    offer_side,
+    start_dt: datetime,
+    end_dt: datetime,
+    granularity: str,
+) -> pd.DataFrame:
+    try:
+        import dukascopy_python as dukascopy
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "dukascopy-python is not installed. Install it with 'pip install -r requirements.txt'."
+        ) from exc
+
+    cursor = int(start_dt.timestamp() * 1000)
+    end_timestamp = int(end_dt.timestamp() * 1000)
+    step_ms = _granularity_seconds(granularity) * 1000
+    rows = []
+    is_first_iteration = True
+
+    while cursor <= end_timestamp:
+        cleaned = []
+        last_updates = dukascopy._fetch(
+            instrument=symbol,
+            interval=interval,
+            offer_side=offer_side,
+            last_update=cursor,
+            limit=30_000,
+        )
+
+        if last_updates:
+            cleaned = [row for row in last_updates if row and row[0] is not None]
+            if not is_first_iteration and cleaned and cleaned[0][0] == cursor:
+                cleaned = cleaned[1:]
+
+            for row in cleaned:
+                if row[0] > end_timestamp:
+                    cursor = end_timestamp + 1
+                    break
+                if interval == dukascopy.INTERVAL_TICK:
+                    row[-1] = row[-1] / 1_000_000
+                    row[-2] = row[-2] / 1_000_000
+                rows.append(row)
+                cursor = row[0]
+
+        if not last_updates or not cleaned:
+            cursor = min(cursor + step_ms, end_timestamp + 1)
+
+        is_first_iteration = False
+
+    time_unit = dukascopy._interval_units[interval]
+    columns = dukascopy._get_dataframe_columns_for_timeunit(time_unit)
+    frame = pd.DataFrame(data=rows, columns=columns)
+    if frame.empty:
+        return frame
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True)
+    return frame.set_index("timestamp")
+
+
+def import_from_dukascopy_api(
+    symbol: str,
+    granularity: str,
+    start: str,
+    end: str,
+    offer_side: str = "bid",
+) -> pd.DataFrame:
+    try:
+        import dukascopy_python as dukascopy
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "dukascopy-python is not installed. Install it with 'pip install -r requirements.txt'."
+        ) from exc
+
+    interval = _dukascopy_interval(granularity)
+    instrument = _dukascopy_instrument(symbol)
+    side = dukascopy.OFFER_SIDE_BID if offer_side.lower() == "bid" else dukascopy.OFFER_SIDE_ASK
+
+    start_dt = pd.to_datetime(start, utc=True).to_pydatetime()
+    end_dt = pd.to_datetime(end, utc=True).to_pydatetime()
+
+    try:
+        frame = dukascopy.fetch(instrument, interval, side, start_dt, end_dt)
+    except TypeError:
+        frame = _safe_dukascopy_fetch(
+            symbol=instrument,
+            interval=interval,
+            offer_side=side,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            granularity=granularity,
+        )
+
+    if frame.empty:
+        raise ValueError(
+            "No Dukascopy data returned. Check symbol, date range, and granularity."
+        )
+    frame = frame.reset_index().rename(columns={"timestamp": "time"})
+    return _standardize_columns(frame)
+
+
 def _oanda_endpoint() -> str:
     env = os.getenv("OANDA_ENV", "practice")
     if env == "live":
@@ -136,6 +304,15 @@ def run_import(config: ImportConfig) -> Path:
         if not config.input_path:
             raise ValueError("--input is required for dukascopy provider")
         data = import_from_dukascopy_csv(config.input_path)
+    elif config.provider == "dukascopy_api":
+        if not config.start or not config.end:
+            raise ValueError("--start and --end are required for dukascopy_api provider")
+        data = import_from_dukascopy_api(
+            symbol=config.symbol,
+            granularity=config.granularity,
+            start=config.start,
+            end=config.end,
+        )
     elif config.provider == "oanda":
         if not config.start or not config.end:
             raise ValueError("--start and --end are required for oanda provider")
@@ -150,7 +327,7 @@ def run_import(config: ImportConfig) -> Path:
 
 def _parse_args() -> ImportConfig:
     parser = argparse.ArgumentParser(description="Import price data into normalized CSV format.")
-    parser.add_argument("--provider", choices=["csv", "dukascopy", "oanda"], default="csv")
+    parser.add_argument("--provider", choices=["csv", "dukascopy", "dukascopy_api", "oanda"], default="csv")
     parser.add_argument("--symbol", default="EUR_USD")
     parser.add_argument("--granularity", default="M1")
     parser.add_argument("--start")
