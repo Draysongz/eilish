@@ -33,6 +33,9 @@ class TradeSymbolConfig:
     max_spread_pips: float
     sl_pips: float
     tp_pips: float
+    sl_mode: str
+    atr_sl_multiplier: float
+    rr_ratio: float
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class StrategyConfig:
     ema_slow: int
     min_bars: int
     allow_short: bool
+    entry_delay_bars: int
     use_rsi: bool
     rsi_period: int
     rsi_overbought: float
@@ -112,6 +116,9 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
             max_spread_pips=float(_required(overrides, "max_spread_pips")),
             sl_pips=float(_required(overrides, "sl_pips")),
             tp_pips=float(_required(overrides, "tp_pips")),
+            sl_mode=str(overrides.get("sl_mode", "fixed")),
+            atr_sl_multiplier=float(overrides.get("atr_sl_multiplier", 2.0)),
+            rr_ratio=float(overrides.get("rr_ratio", 1.0)),
         )
 
     trade = TradeConfig(
@@ -129,6 +136,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         ema_slow=int(_required(strategy_raw, "ema_slow")),
         min_bars=int(_required(strategy_raw, "min_bars")),
         allow_short=bool(_required(strategy_raw, "allow_short")),
+        entry_delay_bars=int(strategy_raw.get("entry_delay_bars", 0)),
         use_rsi=bool(strategy_raw.get("use_rsi", True)),
         rsi_period=int(strategy_raw.get("rsi_period", 14)),
         rsi_overbought=float(strategy_raw.get("rsi_overbought", 70.0)),

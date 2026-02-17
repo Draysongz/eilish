@@ -310,6 +310,7 @@ def run_bot(config: AppConfig) -> None:
                         config.strategy.ema_slow,
                         config.strategy.min_bars,
                         config.strategy.allow_short,
+                        config.strategy.entry_delay_bars,
                         config.strategy.use_rsi,
                         config.strategy.rsi_period,
                         config.strategy.rsi_overbought,
@@ -371,7 +372,34 @@ def run_bot(config: AppConfig) -> None:
                             state.reason,
                         )
 
-                    decision = _build_decision(client, symbol, state.signal, symbol_trade.sl_pips, symbol_trade.tp_pips)
+                    info = client.symbol_info(symbol)
+                    sl_pips = symbol_trade.sl_pips
+                    tp_pips = symbol_trade.tp_pips
+                    if info is not None and symbol_trade.sl_mode == "atr" and state.atr > 0:
+                        pip_size = client._pip_size(info)
+                        if pip_size > 0:
+                            sl_pips = (state.atr * symbol_trade.atr_sl_multiplier) / pip_size
+                            tp_pips = sl_pips * symbol_trade.rr_ratio
+
+                    decision = _build_decision(client, symbol, state.signal, sl_pips, tp_pips)
+                    info = client.symbol_info(symbol)
+                    if info is not None:
+                        pip_size = client._pip_size(info)
+                        contract_size = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
+                        pip_value = contract_size * pip_size * symbol_trade.lot if contract_size > 0 else 0.0
+                        logger.info(
+                            "[%s] risk_params lot=%.4f digits=%s point=%.10f pip_size=%.10f pip_value=%.4f sl_mode=%s atr=%.5f sl_pips=%.2f tp_pips=%.2f",
+                            symbol,
+                            symbol_trade.lot,
+                            getattr(info, "digits", None),
+                            float(getattr(info, "point", 0.0) or 0.0),
+                            pip_size,
+                            pip_value,
+                            symbol_trade.sl_mode,
+                            state.atr,
+                            sl_pips,
+                            tp_pips,
+                        )
                     tick = client.symbol_info_tick(symbol)
                     entry_price = tick.ask if decision.action == "buy" else tick.bid
 

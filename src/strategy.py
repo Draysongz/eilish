@@ -61,6 +61,7 @@ def generate_signal(
     ema_slow: int,
     min_bars: int,
     allow_short: bool,
+    entry_delay_bars: int = 0,
     use_rsi: bool = True,
     rsi_period: int = 14,
     rsi_overbought: float = 70.0,
@@ -89,7 +90,8 @@ def generate_signal(
     Returns:
         StrategyState with signal and indicator values
     """
-    if data.empty or len(data) < max(min_bars, ema_slow + 2, rsi_period + 2, atr_period + 2):
+    required_bars = max(min_bars, ema_slow + entry_delay_bars + 2, rsi_period + 2, atr_period + 2)
+    if data.empty or len(data) < required_bars:
         return StrategyState(
             ema_fast=float("nan"),
             ema_slow=float("nan"),
@@ -112,8 +114,23 @@ def generate_signal(
     curr_atr = float(atr_values.iloc[-1]) if not pd.isna(atr_values.iloc[-1]) else 0.0
 
     # Check for EMA crossover
-    bullish_cross = prev_fast <= prev_slow and curr_fast > curr_slow
-    bearish_cross = prev_fast >= prev_slow and curr_fast < curr_slow
+    if entry_delay_bars > 0:
+        idx = -1 - entry_delay_bars
+        prev_idx = idx - 1
+        if abs(prev_idx) > len(fast) or abs(idx) > len(fast):
+            return StrategyState(
+                ema_fast=curr_fast,
+                ema_slow=curr_slow,
+                signal="hold",
+                rsi=curr_rsi,
+                atr=curr_atr,
+                reason="Insufficient data for delay"
+            )
+        bullish_cross = fast.iloc[prev_idx] <= slow.iloc[prev_idx] and fast.iloc[idx] > slow.iloc[idx] and curr_fast > curr_slow
+        bearish_cross = fast.iloc[prev_idx] >= slow.iloc[prev_idx] and fast.iloc[idx] < slow.iloc[idx] and curr_fast < curr_slow
+    else:
+        bullish_cross = prev_fast <= prev_slow and curr_fast > curr_slow
+        bearish_cross = prev_fast >= prev_slow and curr_fast < curr_slow
     
     # Apply filters
     if bullish_cross:
