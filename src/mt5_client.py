@@ -98,6 +98,14 @@ class MT5Client:
         if magic is None:
             return list(positions)
         return [pos for pos in positions if getattr(pos, "magic", None) == magic]
+
+    def get_position_by_ticket(self, ticket: int):
+        """Get an open position by ticket number."""
+        self._require_mt5()
+        positions = mt5.positions_get(ticket=ticket)
+        if positions:
+            return positions[0]
+        return None
     
     def get_deals_history(self, from_date=None, to_date=None):
         """Get deals history from MT5."""
@@ -151,6 +159,38 @@ class MT5Client:
             raise RuntimeError(f"Order failed: {result}")
         # Return the order/position ticket for tracking
         return result.order if hasattr(result, 'order') else None
+
+    def close_position(self, ticket: int) -> None:
+        """Close an open position by ticket at market."""
+        self._require_mt5()
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            raise RuntimeError(f"Position not found for ticket {ticket}")
+        position = positions[0]
+
+        symbol = position.symbol
+        volume = position.volume
+        order_type = mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise RuntimeError(f"Tick info missing for {symbol}")
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "price": price,
+            "magic": getattr(position, "magic", None) or 0,
+            "comment": "profit-filter",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            raise RuntimeError(f"Close failed: {result}")
 
 
 def credentials_from_env(login_env: str, password_env: str, server_env: str, path_env: str | None = None) -> MT5Credentials:

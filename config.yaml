@@ -5,16 +5,23 @@ mt5:
   server_env: MT5_SERVER
 
 trade:
-  symbols: ["XAUUSD"]
+  symbols: ["XAUUSD", "GBPUSD"]
   timeframe: M1
-  lot: 0.01
-  max_spread_pips: 50
-  sl_pips: 150
-  tp_pips: 250
   max_positions: 1
   magic: 20250212
   dry_run: false
   polling_seconds: 10
+  per_symbol:
+    XAUUSD:
+      lot: 0.01
+      max_spread_pips: 50
+      sl_pips: 150
+      tp_pips: 150
+    GBPUSD:
+      lot: 0.03
+      max_spread_pips: 5
+      sl_pips: 1.5
+      tp_pips: 1.5
 
 # strategy:
 #   ema_fast: 12
@@ -33,7 +40,7 @@ trade:
 
 strategy:
   ema_fast: 6
-  ema_slow: 18
+  ema_slow: 16
   min_bars: 80
   allow_short: true
   # RSI filter settings
@@ -45,6 +52,14 @@ strategy:
   use_atr: true
   atr_period: 14
   atr_min_threshold: 0.2  # Minimum ATR to consider trading
+  atr_min_thresholds:
+    XAUUSD: 0.2
+    GBPUSD: 0.00002
+
+profit_take:
+  enabled: true
+  trigger_usd: 1.0
+  risk_threshold: 0.5
 
 ai:
   enabled: false
