@@ -69,6 +69,7 @@ profit_take:
   risk_threshold: 0.5
   take_profit_usd_per_symbol:
     XAUUSD: 2.5
+  check_interval_seconds: 1
 
 ai:
   enabled: false

@@ -61,6 +61,7 @@ class ProfitTakeFilterConfig:
     trigger_usd: float
     risk_threshold: float
     take_profit_usd_per_symbol: Dict[str, float]
+    check_interval_seconds: int
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
             str(k): float(v)
             for k, v in (profit_raw.get("take_profit_usd_per_symbol", {}) or {}).items()
         },
+        check_interval_seconds=int(profit_raw.get("check_interval_seconds", 1)),
     )
 
     ai = AIConfig(
