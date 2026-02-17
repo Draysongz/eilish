@@ -67,6 +67,8 @@ profit_take:
   enabled: true
   trigger_usd: 1.0
   risk_threshold: 0.5
+  take_profit_usd_per_symbol:
+    XAUUSD: 2.5
 
 ai:
   enabled: false

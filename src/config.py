@@ -60,6 +60,7 @@ class ProfitTakeFilterConfig:
     enabled: bool
     trigger_usd: float
     risk_threshold: float
+    take_profit_usd_per_symbol: Dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,10 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         enabled=bool(profit_raw.get("enabled", False)),
         trigger_usd=float(profit_raw.get("trigger_usd", 1.0)),
         risk_threshold=float(profit_raw.get("risk_threshold", 0.6)),
+        take_profit_usd_per_symbol={
+            str(k): float(v)
+            for k, v in (profit_raw.get("take_profit_usd_per_symbol", {}) or {}).items()
+        },
     )
 
     ai = AIConfig(

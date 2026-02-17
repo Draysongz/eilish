@@ -217,6 +217,16 @@ def _manage_open_positions(client: MT5Client, tracker: TradeTracker, logger, con
             continue
 
         profit = float(getattr(position, "profit", 0.0) or 0.0)
+        take_profit_usd = config.profit_take.take_profit_usd_per_symbol.get(trade.symbol)
+        if take_profit_usd is not None and profit >= take_profit_usd:
+            logger.info(
+                "[%s] profit_cap action=close profit=%.2f target=%.2f",
+                trade.symbol,
+                profit,
+                take_profit_usd,
+            )
+            client.close_position(trade.ticket)
+            continue
         if profit < config.profit_take.trigger_usd:
             continue
 
@@ -268,6 +278,8 @@ def run_bot(config: AppConfig) -> None:
     
     log_section(logger, "BOT START")
     logger.info("symbols=%s timeframe=%s dry_run=%s ai=%s", config.trade.symbols, config.trade.timeframe, config.trade.dry_run, config.ai.enabled)
+    if config.profit_take.enabled and config.profit_take.take_profit_usd_per_symbol:
+        logger.info("profit_cap targets=%s", config.profit_take.take_profit_usd_per_symbol)
     
     creds = credentials_from_env(
         config.mt5.login_env,
