@@ -29,7 +29,7 @@ def setup_logger(
     """
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    logger.propagate = False
+    logger.propagate = True
     
     # Avoid duplicate handlers if logger already configured
     if logger.handlers:

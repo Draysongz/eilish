@@ -11,6 +11,7 @@ from src.mt5_client import MT5Client, credentials_from_env
 from src.strategy import generate_signal, compute_ema, compute_rsi, compute_atr
 from src.logger import log_section, setup_logger
 from src.trade_tracker import TradeTracker
+from strategy_shadow.decision_engine_shadow import ShadowDecisionEngine
 
 
 @dataclass
@@ -312,6 +313,13 @@ def run_bot(config: AppConfig) -> None:
         ai_filter = AITradeFilter(ai_config)
         logger.info("ready threshold=%.2f", config.ai.probability_threshold)
 
+    shadow_engine = None
+    if getattr(config, "shadow_testing", None) and config.shadow_testing.enabled:
+        log_section(logger, "SHADOW TEST")
+        logger.info("init")
+        shadow_engine = ShadowDecisionEngine(config)
+        logger.info("ready")
+
     try:
         log_section(logger, "TRADING LOOP")
         logger.info("started")
@@ -333,6 +341,8 @@ def run_bot(config: AppConfig) -> None:
                     try:
                         symbol_trade = _resolve_symbol_trade(config, symbol)
                         rates = client.get_rates(symbol, config.trade.timeframe, config.strategy.min_bars + 10)
+                        if shadow_engine:
+                            shadow_engine.process(symbol, rates)
                         state = generate_signal(
                             rates,
                             config.strategy.ema_fast,

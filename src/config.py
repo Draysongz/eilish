@@ -71,6 +71,7 @@ class AppConfig:
     strategy: StrategyConfig
     profit_take: ProfitTakeFilterConfig
     ai: "AIConfig"
+    shadow_testing: "ShadowTestingConfig"
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,11 @@ class AIConfig:
     model_path: str
     train_data_path: str
     probability_threshold: float
+
+
+@dataclass(frozen=True)
+class ShadowTestingConfig:
+    enabled: bool
 
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
@@ -100,6 +106,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
     strategy_raw = _required(raw, "strategy")
     profit_raw = raw.get("profit_take", {})
     ai_raw = raw.get("ai", {})
+    shadow_raw = raw.get("shadow_testing", {})
 
     mt5 = MT5Config(
         path_env=_required(mt5_raw, "path_env"),
@@ -170,4 +177,15 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         probability_threshold=float(ai_raw.get("probability_threshold", 0.6)),
     )
 
-    return AppConfig(mt5=mt5, trade=trade, strategy=strategy, profit_take=profit_take, ai=ai)
+    shadow_testing = ShadowTestingConfig(
+        enabled=bool(shadow_raw.get("enabled", False)),
+    )
+
+    return AppConfig(
+        mt5=mt5,
+        trade=trade,
+        strategy=strategy,
+        profit_take=profit_take,
+        ai=ai,
+        shadow_testing=shadow_testing,
+    )
