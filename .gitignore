@@ -6,5 +6,7 @@ venv/
 .vscode/
 .pytest_cache/
 models/*.json
+logs/shadow_trades.csv
+logs/performance_comparison.csv
 logs/
 *.log

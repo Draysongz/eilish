@@ -11,6 +11,7 @@ from src.mt5_client import MT5Client, credentials_from_env
 from src.strategy import generate_signal, compute_ema, compute_rsi, compute_atr
 from src.logger import log_section, setup_logger
 from src.trade_tracker import TradeTracker
+from strategy_shadow.decision_engine_shadow import ShadowDecisionEngine
 
 
 @dataclass
@@ -218,6 +219,13 @@ def _manage_open_positions(client: MT5Client, tracker: TradeTracker, logger, con
 
         profit = float(getattr(position, "profit", 0.0) or 0.0)
         take_profit_usd = config.profit_take.take_profit_usd_per_symbol.get(trade.symbol)
+        if take_profit_usd is not None:
+            logger.info(
+                "[%s] profit_cap check profit=%.2f target=%.2f",
+                trade.symbol,
+                profit,
+                take_profit_usd,
+            )
         if take_profit_usd is not None and profit >= take_profit_usd:
             logger.info(
                 "[%s] profit_cap action=close profit=%.2f target=%.2f",
@@ -305,129 +313,178 @@ def run_bot(config: AppConfig) -> None:
         ai_filter = AITradeFilter(ai_config)
         logger.info("ready threshold=%.2f", config.ai.probability_threshold)
 
+    shadow_engine = None
+    if getattr(config, "shadow_testing", None) and config.shadow_testing.enabled:
+        log_section(logger, "SHADOW TEST")
+        logger.info("init")
+        shadow_engine = ShadowDecisionEngine(config)
+        logger.info("ready")
+
     try:
         log_section(logger, "TRADING LOOP")
         logger.info("started")
+        last_trade_cycle = 0.0
+        last_profit_check = 0.0
+        loop_sleep = min(
+            config.trade.polling_seconds,
+            config.profit_take.check_interval_seconds if config.profit_take.enabled else config.trade.polling_seconds,
+        )
         while True:
-            # Monitor existing positions first
-            _manage_open_positions(client, tracker, logger, config)
-            
-            for symbol in config.trade.symbols:
-                try:
-                    symbol_trade = _resolve_symbol_trade(config, symbol)
-                    rates = client.get_rates(symbol, config.trade.timeframe, config.strategy.min_bars + 10)
-                    state = generate_signal(
-                        rates,
-                        config.strategy.ema_fast,
-                        config.strategy.ema_slow,
-                        config.strategy.min_bars,
-                        config.strategy.allow_short,
-                        config.strategy.entry_delay_bars,
-                        config.strategy.use_rsi,
-                        config.strategy.rsi_period,
-                        config.strategy.rsi_overbought,
-                        config.strategy.rsi_oversold,
-                        config.strategy.use_atr,
-                        config.strategy.atr_period,
-                        config.strategy.atr_min_thresholds.get(
-                            symbol,
-                            config.strategy.atr_min_threshold,
-                        ),
-                    )
+            now = time.time()
+            if config.profit_take.enabled and now - last_profit_check >= config.profit_take.check_interval_seconds:
+                _manage_open_positions(client, tracker, logger, config)
+                last_profit_check = now
 
-                    spread = client.get_spread_pips(symbol)
-                    positions = client.get_open_positions(symbol=symbol, magic=config.trade.magic)
-
-                    if not _should_trade(spread, symbol_trade.max_spread_pips, len(positions), config.trade.max_positions):
-                        logger.info(
-                            "[%s] block=risk spread=%.2f positions=%d",
-                            symbol,
-                            spread,
-                            len(positions),
+            if now - last_trade_cycle >= config.trade.polling_seconds:
+                last_trade_cycle = now
+                for symbol in config.trade.symbols:
+                    try:
+                        symbol_trade = _resolve_symbol_trade(config, symbol)
+                        rates = client.get_rates(symbol, config.trade.timeframe, config.strategy.min_bars + 10)
+                        if shadow_engine:
+                            shadow_engine.process(symbol, rates)
+                        state = generate_signal(
+                            rates,
+                            config.strategy.ema_fast,
+                            config.strategy.ema_slow,
+                            config.strategy.min_bars,
+                            config.strategy.allow_short,
+                            config.strategy.entry_delay_bars,
+                            config.strategy.use_rsi,
+                            config.strategy.rsi_period,
+                            config.strategy.rsi_overbought,
+                            config.strategy.rsi_oversold,
+                            config.strategy.use_atr,
+                            config.strategy.atr_period,
+                            config.strategy.atr_min_thresholds.get(
+                                symbol,
+                                config.strategy.atr_min_threshold,
+                            ),
                         )
-                        continue
 
-                    if state.signal == "hold":
-                        logger.info(
-                            "[%s] signal=hold ema_fast=%.5f ema_slow=%.5f rsi=%.1f atr=%.5f reason=%s",
-                            symbol,
-                            state.ema_fast,
-                            state.ema_slow,
-                            state.rsi,
-                            state.atr,
-                            state.reason,
-                        )
-                        continue
+                        spread = client.get_spread_pips(symbol)
+                        positions = client.get_open_positions(symbol=symbol, magic=config.trade.magic)
 
-                    ai_probability = None
-                    if ai_filter:
-                        allowed, probability = ai_filter.evaluate(rates)
-                        ai_probability = probability
-                        logger.info(
-                            "[%s] signal=%s rsi=%.1f atr=%.5f ai_prob=%.2f ai_allowed=%s",
-                            symbol,
-                            state.signal.upper(),
-                            state.rsi,
-                            state.atr,
-                            probability,
-                            allowed,
-                        )
-                        if not allowed:
+                        if not _should_trade(spread, symbol_trade.max_spread_pips, len(positions), config.trade.max_positions):
+                            logger.info(
+                                "[%s] block=risk spread=%.2f positions=%d",
+                                symbol,
+                                spread,
+                                len(positions),
+                            )
                             continue
-                    else:
-                        logger.info(
-                            "[%s] signal=%s rsi=%.1f atr=%.5f reason=%s",
-                            symbol,
-                            state.signal.upper(),
-                            state.rsi,
-                            state.atr,
-                            state.reason,
+
+                        if state.signal == "hold":
+                            logger.info(
+                                "[%s] signal=hold ema_fast=%.5f ema_slow=%.5f rsi=%.1f atr=%.5f reason=%s",
+                                symbol,
+                                state.ema_fast,
+                                state.ema_slow,
+                                state.rsi,
+                                state.atr,
+                                state.reason,
+                            )
+                            continue
+
+                        ai_probability = None
+                        if ai_filter:
+                            allowed, probability = ai_filter.evaluate(rates)
+                            ai_probability = probability
+                            logger.info(
+                                "[%s] signal=%s rsi=%.1f atr=%.5f ai_prob=%.2f ai_allowed=%s",
+                                symbol,
+                                state.signal.upper(),
+                                state.rsi,
+                                state.atr,
+                                probability,
+                                allowed,
+                            )
+                            if not allowed:
+                                continue
+                        else:
+                            logger.info(
+                                "[%s] signal=%s rsi=%.1f atr=%.5f reason=%s",
+                                symbol,
+                                state.signal.upper(),
+                                state.rsi,
+                                state.atr,
+                                state.reason,
+                            )
+
+                        info = client.symbol_info(symbol)
+                        sl_pips = symbol_trade.sl_pips
+                        tp_pips = symbol_trade.tp_pips
+                        if info is not None and symbol_trade.sl_mode == "atr" and state.atr > 0:
+                            pip_size = client._pip_size(info)
+                            if pip_size > 0:
+                                sl_pips = (state.atr * symbol_trade.atr_sl_multiplier) / pip_size
+                                tp_pips = sl_pips * symbol_trade.rr_ratio
+
+                        decision = _build_decision(client, symbol, state.signal, sl_pips, tp_pips)
+                        info = client.symbol_info(symbol)
+                        if info is not None:
+                            pip_size = client._pip_size(info)
+                            contract_size = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
+                            pip_value = contract_size * pip_size * symbol_trade.lot if contract_size > 0 else 0.0
+                            logger.info(
+                                "[%s] risk_params lot=%.4f digits=%s point=%.10f pip_size=%.10f pip_value=%.4f sl_mode=%s atr=%.5f sl_pips=%.2f tp_pips=%.2f",
+                                symbol,
+                                symbol_trade.lot,
+                                getattr(info, "digits", None),
+                                float(getattr(info, "point", 0.0) or 0.0),
+                                pip_size,
+                                pip_value,
+                                symbol_trade.sl_mode,
+                                state.atr,
+                                sl_pips,
+                                tp_pips,
+                            )
+                        tick = client.symbol_info_tick(symbol)
+                        entry_price = tick.ask if decision.action == "buy" else tick.bid
+
+                        if config.trade.dry_run:
+                            logger.info(
+                                "[%s] dry_run action=%s lot=%.2f entry=%.5f sl=%.5f tp=%.5f spread=%.2f",
+                                symbol,
+                                decision.action.upper(),
+                                symbol_trade.lot,
+                                entry_price,
+                                decision.sl,
+                                decision.tp,
+                                spread,
+                            )
+                            # In dry run, use timestamp as fake ticket
+                            fake_ticket = int(time.time() * 1000) % 1000000
+                            tracker.record_trade(
+                                symbol=symbol,
+                                action=decision.action,
+                                lot=symbol_trade.lot,
+                                entry_price=entry_price,
+                                sl_price=decision.sl,
+                                tp_price=decision.tp,
+                                magic=config.trade.magic,
+                                spread_pips=spread,
+                                ai_probability=ai_probability,
+                                ticket=fake_ticket,
+                            )
+                            continue
+
+                        logger.info("[%s] order_submit action=%s", symbol, decision.action.upper())
+                        ticket = client.place_market_order(
+                            symbol=decision.symbol,
+                            action=decision.action,
+                            lot=symbol_trade.lot,
+                            sl_price=decision.sl,
+                            tp_price=decision.tp,
+                            magic=config.trade.magic,
                         )
-
-                    info = client.symbol_info(symbol)
-                    sl_pips = symbol_trade.sl_pips
-                    tp_pips = symbol_trade.tp_pips
-                    if info is not None and symbol_trade.sl_mode == "atr" and state.atr > 0:
-                        pip_size = client._pip_size(info)
-                        if pip_size > 0:
-                            sl_pips = (state.atr * symbol_trade.atr_sl_multiplier) / pip_size
-                            tp_pips = sl_pips * symbol_trade.rr_ratio
-
-                    decision = _build_decision(client, symbol, state.signal, sl_pips, tp_pips)
-                    info = client.symbol_info(symbol)
-                    if info is not None:
-                        pip_size = client._pip_size(info)
-                        contract_size = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
-                        pip_value = contract_size * pip_size * symbol_trade.lot if contract_size > 0 else 0.0
                         logger.info(
-                            "[%s] risk_params lot=%.4f digits=%s point=%.10f pip_size=%.10f pip_value=%.4f sl_mode=%s atr=%.5f sl_pips=%.2f tp_pips=%.2f",
-                            symbol,
-                            symbol_trade.lot,
-                            getattr(info, "digits", None),
-                            float(getattr(info, "point", 0.0) or 0.0),
-                            pip_size,
-                            pip_value,
-                            symbol_trade.sl_mode,
-                            state.atr,
-                            sl_pips,
-                            tp_pips,
-                        )
-                    tick = client.symbol_info_tick(symbol)
-                    entry_price = tick.ask if decision.action == "buy" else tick.bid
-
-                    if config.trade.dry_run:
-                        logger.info(
-                            "[%s] dry_run action=%s lot=%.2f entry=%.5f sl=%.5f tp=%.5f spread=%.2f",
+                            "[%s] order_filled action=%s entry=%.5f ticket=%s",
                             symbol,
                             decision.action.upper(),
-                            symbol_trade.lot,
                             entry_price,
-                            decision.sl,
-                            decision.tp,
-                            spread,
+                            ticket,
                         )
-                        # In dry run, use timestamp as fake ticket
-                        fake_ticket = int(time.time() * 1000) % 1000000
                         tracker.record_trade(
                             symbol=symbol,
                             action=decision.action,
@@ -438,43 +495,13 @@ def run_bot(config: AppConfig) -> None:
                             magic=config.trade.magic,
                             spread_pips=spread,
                             ai_probability=ai_probability,
-                            ticket=fake_ticket,
+                            ticket=ticket,
                         )
-                        continue
 
-                    logger.info("[%s] order_submit action=%s", symbol, decision.action.upper())
-                    ticket = client.place_market_order(
-                        symbol=decision.symbol,
-                        action=decision.action,
-                        lot=symbol_trade.lot,
-                        sl_price=decision.sl,
-                        tp_price=decision.tp,
-                        magic=config.trade.magic,
-                    )
-                    logger.info(
-                        "[%s] order_filled action=%s entry=%.5f ticket=%s",
-                        symbol,
-                        decision.action.upper(),
-                        entry_price,
-                        ticket,
-                    )
-                    tracker.record_trade(
-                        symbol=symbol,
-                        action=decision.action,
-                        lot=symbol_trade.lot,
-                        entry_price=entry_price,
-                        sl_price=decision.sl,
-                        tp_price=decision.tp,
-                        magic=config.trade.magic,
-                        spread_pips=spread,
-                        ai_probability=ai_probability,
-                        ticket=ticket,
-                    )
-                
-                except Exception as e:
-                    logger.error(f"[{symbol}] Error processing symbol: {e}", exc_info=True)
+                    except Exception as e:
+                        logger.error(f"[{symbol}] Error processing symbol: {e}", exc_info=True)
 
-            time.sleep(config.trade.polling_seconds)
+            time.sleep(loop_sleep)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
@@ -482,18 +509,42 @@ def run_bot(config: AppConfig) -> None:
         raise
     finally:
         logger.info("Shutting down MT5 connection")
-        client.shutdown()
-        
-        # Show performance summary
-        metrics = tracker.calculate_metrics()
-        if metrics:
+        # Daily MT5 summary using magic number
+        try:
+            from datetime import datetime, time as dt_time
+
+            now = datetime.now()
+            day_start = datetime.combine(now.date(), dt_time.min)
+            day_end = now
+            deals = client.get_deals_history(from_date=day_start, to_date=day_end)
+            bot_deals = [
+                d
+                for d in deals
+                if getattr(d, "magic", None) == config.trade.magic
+                and getattr(d, "entry", None) == 1
+            ]
+
+            total_trades = len(bot_deals)
+            total_profit = sum(float(getattr(d, "profit", 0.0) or 0.0) for d in bot_deals if float(getattr(d, "profit", 0.0) or 0.0) > 0)
+            total_loss = sum(float(getattr(d, "profit", 0.0) or 0.0) for d in bot_deals if float(getattr(d, "profit", 0.0) or 0.0) < 0)
+            wins = [d for d in bot_deals if float(getattr(d, "profit", 0.0) or 0.0) > 0]
+            win_rate = (len(wins) / total_trades) if total_trades > 0 else 0.0
+
             logger.info("=" * 50)
-            logger.info("PERFORMANCE SUMMARY")
-            logger.info(f"Total trades: {metrics.total_trades}")
-            logger.info(f"Win rate: {metrics.win_rate:.1%}")
-            logger.info(f"Net profit: {metrics.net_profit:.2f}")
-            logger.info(f"Profit factor: {metrics.profit_factor:.2f}")
+            logger.info("DAILY MT5 SUMMARY")
+            logger.info("Date: %s", now.date().isoformat())
+            logger.info("Total trades: %d", total_trades)
+            logger.info("Winning trades: %d", len(wins))
+            logger.info("Losing trades: %d", total_trades - len(wins))
+            logger.info("Win rate: %.1f%%", win_rate * 100)
+            logger.info("Total profit: %.2f", total_profit)
+            logger.info("Total loss: %.2f", total_loss)
+            logger.info("Net profit: %.2f", total_profit + total_loss)
             logger.info("=" * 50)
+        except Exception as e:
+            logger.error("Daily summary failed: %s", e, exc_info=True)
+        finally:
+            client.shutdown()
 
 
 def main() -> None:

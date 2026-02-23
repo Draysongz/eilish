@@ -69,9 +69,13 @@ profit_take:
   risk_threshold: 0.5
   take_profit_usd_per_symbol:
     XAUUSD: 2.5
+  check_interval_seconds: 1
 
 ai:
   enabled: false
   model_path: models/ai_filter.json
   train_data_path: data/trades.csv
   probability_threshold: 0.45
+
+shadow_testing:
+  enabled: false
