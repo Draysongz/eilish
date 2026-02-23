@@ -5,8 +5,8 @@ mt5:
   server_env: MT5_SERVER
 
 trade:
-  symbols: ["XAUUSD", "GBPUSD"]
-  timeframe: M1
+  symbols: ["XAUUSD"]
+  timeframe: M5
   max_positions: 1
   magic: 20250212
   dry_run: false
