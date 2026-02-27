@@ -214,6 +214,53 @@ def _manage_open_positions(client: MT5Client, tracker: TradeTracker, logger, con
                 )
             continue
 
+        # ========== BREAK-EVEN LOGIC ==========
+        # Move SL to entry price when profit reaches activation threshold
+        if config.breakeven.enabled:
+            current_price = float(getattr(position, "price_current", 0.0) or 0.0)
+            entry_price = trade.entry_price
+            sl_price = float(getattr(position, "sl", 0.0) or 0.0)
+            
+            if entry_price > 0 and sl_price > 0 and current_price > 0:
+                # Calculate initial risk (distance from entry to SL)
+                if trade.action == "buy":
+                    initial_risk = entry_price - sl_price
+                    current_profit_distance = current_price - entry_price
+                else:  # sell
+                    initial_risk = sl_price - entry_price
+                    current_profit_distance = entry_price - current_price
+                
+                # Check if profit has reached activation threshold
+                if initial_risk > 0:
+                    profit_ratio = current_profit_distance / initial_risk
+                    
+                    # Move SL to break-even if threshold reached and not already at BE
+                    if profit_ratio >= config.breakeven.activation_ratio:
+                        # Check if SL is not already at break-even
+                        sl_at_be = abs(sl_price - entry_price) < abs(entry_price * 0.00001)  # Allow small tolerance
+                        
+                        if not sl_at_be:
+                            try:
+                                tp_price = float(getattr(position, "tp", 0.0) or 0.0)
+                                client.modify_position(trade.ticket, entry_price, tp_price)
+                                logger.info(
+                                    "[%s] breakeven action=move_sl ticket=%s profit_ratio=%.2f entry=%.5f old_sl=%.5f new_sl=%.5f",
+                                    trade.symbol,
+                                    trade.ticket,
+                                    profit_ratio,
+                                    entry_price,
+                                    sl_price,
+                                    entry_price,
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "[%s] breakeven failed ticket=%s error=%s",
+                                    trade.symbol,
+                                    trade.ticket,
+                                    str(e),
+                                )
+
+        # ========== PROFIT CAP LOGIC (DISABLED BY DEFAULT) ==========
         if not config.profit_take.enabled:
             continue
 
@@ -360,6 +407,17 @@ def run_bot(config: AppConfig) -> None:
                                 symbol,
                                 config.strategy.atr_min_threshold,
                             ),
+                            # Entry refinement filters
+                            config.strategy.use_expansion_candle_filter,
+                            config.strategy.expansion_lookback,
+                            config.strategy.expansion_multiplier,
+                            config.strategy.use_distance_from_ema_filter,
+                            config.strategy.distance_from_ema_multiplier,
+                            config.strategy.use_atr_spike_filter,
+                            config.strategy.atr_spike_lookback,
+                            config.strategy.atr_spike_multiplier,
+                            config.strategy.use_break_structure_filter,
+                            config.strategy.break_structure_lookback,
                         )
 
                         spread = client.get_spread_pips(symbol)
@@ -414,10 +472,21 @@ def run_bot(config: AppConfig) -> None:
                         info = client.symbol_info(symbol)
                         sl_pips = symbol_trade.sl_pips
                         tp_pips = symbol_trade.tp_pips
+                        sl_capped = False
                         if info is not None and symbol_trade.sl_mode == "atr" and state.atr > 0:
                             pip_size = client._pip_size(info)
+                            point = float(getattr(info, "point", 0.0) or 0.0)
                             if pip_size > 0:
-                                sl_pips = (state.atr * symbol_trade.atr_sl_multiplier) / pip_size
+                                # Calculate SL from ATR
+                                sl_pips_raw = (state.atr * symbol_trade.atr_sl_multiplier) / pip_size
+                                
+                                # Apply maximum SL cap (max_sl_cap_points is in points, convert to pips)
+                                # For XAUUSD: 400 points = 40 pips (since digits=5, point=0.00001, pip=0.0001)
+                                max_sl_pips = (symbol_trade.max_sl_cap_points * point) / pip_size
+                                sl_pips = min(sl_pips_raw, max_sl_pips)
+                                sl_capped = sl_pips_raw > max_sl_pips
+                                
+                                # Calculate TP with new RR ratio
                                 tp_pips = sl_pips * symbol_trade.rr_ratio
 
                         decision = _build_decision(client, symbol, state.signal, sl_pips, tp_pips)
@@ -427,7 +496,7 @@ def run_bot(config: AppConfig) -> None:
                             contract_size = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
                             pip_value = contract_size * pip_size * symbol_trade.lot if contract_size > 0 else 0.0
                             logger.info(
-                                "[%s] risk_params lot=%.4f digits=%s point=%.10f pip_size=%.10f pip_value=%.4f sl_mode=%s atr=%.5f sl_pips=%.2f tp_pips=%.2f",
+                                "[%s] risk_params lot=%.4f digits=%s point=%.10f pip_size=%.10f pip_value=%.4f sl_mode=%s atr=%.5f sl_pips=%.2f tp_pips=%.2f sl_capped=%s",
                                 symbol,
                                 symbol_trade.lot,
                                 getattr(info, "digits", None),
@@ -438,6 +507,7 @@ def run_bot(config: AppConfig) -> None:
                                 state.atr,
                                 sl_pips,
                                 tp_pips,
+                                sl_capped,
                             )
                         tick = client.symbol_info_tick(symbol)
                         entry_price = tick.ask if decision.action == "buy" else tick.bid

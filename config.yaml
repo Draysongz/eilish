@@ -18,8 +18,9 @@ trade:
       sl_pips: 150
       tp_pips: 150
       sl_mode: atr
-      atr_sl_multiplier: 2.0
-      rr_ratio: 1.0
+      atr_sl_multiplier: 1.5
+      rr_ratio: 1.8
+      max_sl_cap_points: 400  # Maximum SL in points (XAUUSD: 400 = 40 pips)
     GBPUSD:
       lot: 0.02
       max_spread_pips: 5
@@ -62,14 +63,30 @@ strategy:
   atr_min_thresholds:
     XAUUSD: 0.2
     GBPUSD: 0.00002
+  # Entry refinement filters (reduce late entries)
+  use_expansion_candle_filter: false
+  expansion_lookback: 10
+  expansion_multiplier: 1.5
+  use_distance_from_ema_filter: false
+  distance_from_ema_multiplier: 1.2
+  use_atr_spike_filter: false
+  atr_spike_lookback: 20
+  atr_spike_multiplier: 1.5
+  use_break_structure_filter: false
+  break_structure_lookback: 5
 
 profit_take:
   enabled: true
-  trigger_usd: 1.0
+  trigger_usd: 6
   risk_threshold: 0.5
+  # Profit cap removed - let trades run to TP/SL
   take_profit_usd_per_symbol:
-    XAUUSD: 2.5
+    XAUUSD: 5
   check_interval_seconds: 1
+
+breakeven:
+  enabled: true
+  activation_ratio: 0.8  # Move SL to BE when profit reaches 80% of initial risk
 
 ai:
   enabled: false
@@ -78,4 +95,5 @@ ai:
   probability_threshold: 0.45
 
 shadow_testing:
-  enabled: false
+  enabled: true
+  log_trades: true

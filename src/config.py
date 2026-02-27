@@ -36,6 +36,7 @@ class TradeSymbolConfig:
     sl_mode: str
     atr_sl_multiplier: float
     rr_ratio: float
+    max_sl_cap_points: float = 400.0
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,17 @@ class StrategyConfig:
     atr_period: int
     atr_min_threshold: float
     atr_min_thresholds: Dict[str, float]
+    # Entry refinement filters
+    use_expansion_candle_filter: bool = True
+    expansion_lookback: int = 10
+    expansion_multiplier: float = 1.5
+    use_distance_from_ema_filter: bool = True
+    distance_from_ema_multiplier: float = 1.2
+    use_atr_spike_filter: bool = True
+    atr_spike_lookback: int = 20
+    atr_spike_multiplier: float = 1.5
+    use_break_structure_filter: bool = True
+    break_structure_lookback: int = 5
 
 
 @dataclass(frozen=True)
@@ -65,11 +77,18 @@ class ProfitTakeFilterConfig:
 
 
 @dataclass(frozen=True)
+class BreakevenConfig:
+    enabled: bool
+    activation_ratio: float  # Move SL to BE when profit reaches this ratio of initial risk
+
+
+@dataclass(frozen=True)
 class AppConfig:
     mt5: MT5Config
     trade: TradeConfig
     strategy: StrategyConfig
     profit_take: ProfitTakeFilterConfig
+    breakeven: BreakevenConfig
     ai: "AIConfig"
     shadow_testing: "ShadowTestingConfig"
 
@@ -128,6 +147,7 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
             sl_mode=str(overrides.get("sl_mode", "fixed")),
             atr_sl_multiplier=float(overrides.get("atr_sl_multiplier", 2.0)),
             rr_ratio=float(overrides.get("rr_ratio", 1.0)),
+            max_sl_cap_points=float(overrides.get("max_sl_cap_points", 400.0)),
         )
 
     trade = TradeConfig(
@@ -157,6 +177,17 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
             str(k): float(v)
             for k, v in (strategy_raw.get("atr_min_thresholds", {}) or {}).items()
         },
+        # Entry refinement filters
+        use_expansion_candle_filter=bool(strategy_raw.get("use_expansion_candle_filter", True)),
+        expansion_lookback=int(strategy_raw.get("expansion_lookback", 10)),
+        expansion_multiplier=float(strategy_raw.get("expansion_multiplier", 1.5)),
+        use_distance_from_ema_filter=bool(strategy_raw.get("use_distance_from_ema_filter", True)),
+        distance_from_ema_multiplier=float(strategy_raw.get("distance_from_ema_multiplier", 1.2)),
+        use_atr_spike_filter=bool(strategy_raw.get("use_atr_spike_filter", True)),
+        atr_spike_lookback=int(strategy_raw.get("atr_spike_lookback", 20)),
+        atr_spike_multiplier=float(strategy_raw.get("atr_spike_multiplier", 1.5)),
+        use_break_structure_filter=bool(strategy_raw.get("use_break_structure_filter", True)),
+        break_structure_lookback=int(strategy_raw.get("break_structure_lookback", 5)),
     )
 
     profit_take = ProfitTakeFilterConfig(
@@ -181,11 +212,18 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         enabled=bool(shadow_raw.get("enabled", False)),
     )
 
+    breakeven_raw = raw.get("breakeven", {})
+    breakeven = BreakevenConfig(
+        enabled=bool(breakeven_raw.get("enabled", False)),
+        activation_ratio=float(breakeven_raw.get("activation_ratio", 0.8)),
+    )
+
     return AppConfig(
         mt5=mt5,
         trade=trade,
         strategy=strategy,
         profit_take=profit_take,
+        breakeven=breakeven,
         ai=ai,
         shadow_testing=shadow_testing,
     )

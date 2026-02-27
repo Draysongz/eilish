@@ -192,6 +192,29 @@ class MT5Client:
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             raise RuntimeError(f"Close failed: {result}")
 
+    def modify_position(self, ticket: int, sl_price: float, tp_price: float) -> None:
+        """Modify SL/TP of an open position."""
+        self._require_mt5()
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            raise RuntimeError(f"Position not found for ticket {ticket}")
+        position = positions[0]
+
+        symbol = position.symbol
+        
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": symbol,
+            "sl": sl_price,
+            "tp": tp_price,
+            "magic": getattr(position, "magic", None) or 0,
+            "comment": "modify-sltp",
+        }
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            raise RuntimeError(f"Modify failed: {result}")
+
 
 def credentials_from_env(login_env: str, password_env: str, server_env: str, path_env: str | None = None) -> MT5Credentials:
     login = int(os.getenv(login_env, "0"))
